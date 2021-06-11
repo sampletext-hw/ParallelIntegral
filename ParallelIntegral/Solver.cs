@@ -20,7 +20,8 @@ namespace ParallelIntegral
             get { return _result; }
         }
 
-        private volatile uint _activeThreads;
+        private volatile uint _started;
+        private volatile uint _finished;
 
         public Solver(Func<double, double> equation, double left, double right, double precision)
         {
@@ -29,22 +30,33 @@ namespace ParallelIntegral
             _left = left;
             _right = right;
             _precision = precision;
-
-            _activeThreads = 0;
         }
 
-        public bool HasFinished => _activeThreads == 0;
+        public bool HasFinished => _started == _finished;
 
-        public void Solve()
+        public void SolveParallel()
         {
             var thread = new Thread(SolveRoutine);
+            Interlocked.Increment(ref _started);
             thread.Start(new object[] {_left, _right});
+        }
+
+        public double SolveSync()
+        {
+            double res = 0;
+            for (double left = _left; left < _right; left += _precision)
+            {
+                double right = left + _precision;
+                double center = left + (right - left) / 2;
+                res += _equation(center) * _precision;
+            }
+
+            return res;
         }
 
         private void SolveRoutine(object args)
         {
             _semaphore.WaitOne();
-            Interlocked.Increment(ref _activeThreads);
             var left = (double)((object[])args)[0];
             var right = (double)((object[])args)[1];
 
@@ -59,18 +71,34 @@ namespace ParallelIntegral
             if (distance < _precision)
             {
                 // Change parameter to 'left', 'right' or 'center' for three offered methods of calculation
-                _result += _equation(center) * distance;
+                _result += (_equation(left) + _equation(right)) / 2 * distance;
             }
             else
             {
-                var threadLeft = new Thread(SolveRoutine);
-                threadLeft.Start(new object[] {left, center});
+                if (_started < Environment.ProcessorCount)
+                {
+                    Interlocked.Add(ref _started, 2);
+                    var threadLeft = new Thread(SolveRoutine);
+                    threadLeft.Start(new object[] {left, center});
 
-                var threadRight = new Thread(SolveRoutine);
-                threadRight.Start(new object[] {center, right});
+                    var threadRight = new Thread(SolveRoutine);
+                    threadRight.Start(new object[] {center, right});
+                }
+                else
+                {
+                    double res = 0;
+                    for (double l = left; l < right; l += _precision)
+                    {
+                        double r = l + _precision;
+                        double c = l + (r - l) / 2;
+                        res += _equation(c) * _precision;
+                    }
+
+                    _result += res;
+                }
             }
 
-            Interlocked.Decrement(ref _activeThreads);
+            Interlocked.Increment(ref _finished);
             _semaphore.Release();
         }
     }

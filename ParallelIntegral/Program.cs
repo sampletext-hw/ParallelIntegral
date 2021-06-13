@@ -20,17 +20,6 @@ namespace ParallelIntegral
             var stopwatchParallel = Stopwatch.StartNew();
             solver.SolveParallel();
 
-            int dots = 1;
-            while (!solver.HasFinished)
-            {
-                Console.Clear();
-                Console.WriteLine($"Waiting{new string('.', dots)}");
-                Thread.Sleep(30);
-
-                dots %= 3;
-                dots++;
-            }
-
             Console.WriteLine($"Parallel: Result {solver.Result} in {stopwatchParallel.ElapsedMilliseconds} ms");
 
             var stopwatchSync = Stopwatch.StartNew();

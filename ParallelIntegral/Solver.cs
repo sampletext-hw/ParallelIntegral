@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using System.Threading;
 
 namespace ParallelIntegral
@@ -12,6 +11,8 @@ namespace ParallelIntegral
         private readonly double _right;
         private readonly double _precision;
 
+        private readonly Semaphore _semaphore;
+
         private double _result;
 
         public double Result
@@ -19,40 +20,28 @@ namespace ParallelIntegral
             get { return _result; }
         }
 
+        private volatile uint _startedThreads;
+        private volatile uint _endedThreads;
+
         public Solver(Func<double, double> equation, double left, double right, double precision)
         {
             _equation = equation;
+            var processorCount = Environment.ProcessorCount;
+            _semaphore = new Semaphore(processorCount, processorCount);
             _left = left;
             _right = right;
             _precision = precision;
+
+            _startedThreads = 0;
         }
+
+        public bool HasFinished => _startedThreads == _endedThreads;
 
         public void SolveParallel()
         {
-            var processorCount = Environment.ProcessorCount;
-            var distance = _right - _left;
-            var distancePerThread = distance / processorCount;
-            var threads = new Thread[processorCount];
-
-            double[] results = new double[processorCount];
-            
-            for (int i = 0; i < processorCount; i++)
-            {
-                int localI = i;
-                var left = _left + distancePerThread * localI;
-                var right = _left + distancePerThread * (localI + 1);
-
-                var thread = new Thread(() => SolveRoutine(left, right, out results[localI]));
-                thread.Start();
-                threads[i] = thread;
-            }
-
-            foreach (var thread in threads)
-            {
-                thread.Join();
-            }
-
-            _result = results.Sum();
+            var thread = new Thread(() => SolveRoutine(_left, _right));
+            Interlocked.Increment(ref _startedThreads);
+            thread.Start();
         }
 
         public double SolveSync()
@@ -68,8 +57,13 @@ namespace ParallelIntegral
             return res;
         }
 
-        private void SolveRoutine(double left, double right, out double result)
+        private void SolveRoutine(double left, double right)
         {
+            _semaphore.WaitOne();
+
+            // Some debugging
+            // Console.WriteLine($"Processing: {left.ToString("0.0000")}..{right.ToString("0.0000")}");
+
             var distance = right - left;
 
             var half = distance / 2;
@@ -78,14 +72,21 @@ namespace ParallelIntegral
             if (distance < _precision)
             {
                 // Change parameter to 'left', 'right' or 'center' for three offered methods of calculation
-                result = _equation(center) * distance;
+                _result += _equation(center) * distance;
             }
             else
             {
-                SolveRoutine(left, center, out var r1);
-                SolveRoutine(center, right, out var r2);
-                result = r1 + r2;
+                var threadLeft = new Thread(() => SolveRoutine(left, center));
+                Interlocked.Increment(ref _startedThreads);
+                threadLeft.Start();
+
+                var threadRight = new Thread(() => SolveRoutine(center, right));
+                Interlocked.Increment(ref _startedThreads);
+                threadRight.Start();
             }
+
+            Interlocked.Increment(ref _endedThreads);
+            _semaphore.Release();
         }
     }
 }

@@ -14,11 +14,22 @@ namespace ParallelIntegral
                 equation: x => Math.Sin(Math.Sqrt(x)) * Math.Pow(Math.E, Math.Sqrt(x)) / Math.Sqrt(x),
                 left: 0,
                 right: 9,
-                precision: 0.0000001
+                precision: 0.001
             );
 
             var stopwatchParallel = Stopwatch.StartNew();
             solver.SolveParallel();
+
+            int dots = 1;
+            while (!solver.HasFinished)
+            {
+                Console.Clear();
+                Console.WriteLine($"Waiting{new string('.', dots)}");
+                Thread.Sleep(30);
+
+                dots %= 3;
+                dots++;
+            }
 
             Console.WriteLine($"Parallel: Result {solver.Result} in {stopwatchParallel.ElapsedMilliseconds} ms");
 
